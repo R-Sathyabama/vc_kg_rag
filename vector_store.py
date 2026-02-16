@@ -102,11 +102,17 @@ class VectorStoreManager:
                 query, k=k
             )
             
-            # Filter by threshold
-            filtered_docs = [
-                doc for doc, score in docs_with_scores 
-                if score >= threshold or self.vector_store_type == "chroma"  # Chroma uses distance
-            ]
+            # For ChromaDB, lower distance = higher similarity
+            # Convert to similarity scores (0-100%)
+            if self.vector_store_type == "chroma":
+                # Chroma returns distances (lower is better)
+                filtered_docs = [doc for doc, score in docs_with_scores]
+            else:
+                # FAISS returns similarity scores (higher is better)
+                filtered_docs = [
+                    doc for doc, score in docs_with_scores 
+                    if score >= threshold
+                ]
             
             return filtered_docs[:k]
         except Exception as e:
@@ -123,6 +129,9 @@ class VectorStoreManager:
         Returns:
             Fused list of documents
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        
         try:
             # Generate multiple query perspectives
             query_generation_prompt = PromptTemplate(
@@ -150,12 +159,21 @@ class VectorStoreManager:
             generated_queries = [q.strip() for q in result.split('\n') if q.strip()]
             all_queries = [query] + generated_queries[:3]
             
+            logger.info(f"\n      🔀 RAG FUSION - Generated Query Variations:")
+            logger.info(f"      {'─' * 70}")
+            for i, q in enumerate(all_queries, 1):
+                prefix = "Original" if i == 1 else f"Variant {i-1}"
+                logger.info(f"      {prefix:>12}: {q}")
+            logger.info(f"      {'─' * 70}\n")
+            
             # Retrieve documents for each query
             all_docs = []
             doc_scores = {}
             
-            for q in all_queries:
+            logger.info(f"      🔎 Searching with {len(all_queries)} query variations...")
+            for idx, q in enumerate(all_queries):
                 docs = self.similarity_search(q, k=k)
+                logger.info(f"         Query {idx+1}: Found {len(docs)} documents")
                 for doc in docs:
                     doc_id = doc.page_content[:100]  # Use first 100 chars as ID
                     if doc_id in doc_scores:
@@ -170,10 +188,16 @@ class VectorStoreManager:
                 reverse=True
             )
             
+            logger.info(f"\n      ✅ Fusion Complete:")
+            logger.info(f"         • Total unique chunks: {len(sorted_docs)}")
+            logger.info(f"         • Top {min(k, len(sorted_docs))} selected")
+            logger.info(f"         • Fusion scores: {[d['score'] for d in sorted_docs[:5]]}")
+            
             return [item['doc'] for item in sorted_docs[:k]]
             
         except Exception as e:
-            print(f"RAG Fusion failed, falling back to regular search: {str(e)}")
+            logger.warning(f"      ⚠️  RAG Fusion failed: {str(e)}")
+            logger.info(f"      ↩️  Falling back to regular search")
             return self.similarity_search(query, k=k)
     
     def adaptive_retrieval(
@@ -217,10 +241,16 @@ class VectorStoreManager:
             # Adjust k based on complexity
             if 'simple' in complexity:
                 adjusted_k = max(3, k - 2)
+                logger.info(f"      🎯 Query Complexity: SIMPLE")
+                logger.info(f"      📊 Adjusted retrieval: {adjusted_k} documents (reduced)")
             elif 'complex' in complexity:
                 adjusted_k = k + 3
+                logger.info(f"      🎯 Query Complexity: COMPLEX")
+                logger.info(f"      📊 Adjusted retrieval: {adjusted_k} documents (increased)")
             else:
                 adjusted_k = k
+                logger.info(f"      🎯 Query Complexity: MEDIUM")
+                logger.info(f"      📊 Adjusted retrieval: {adjusted_k} documents (standard)")
             
             # Retrieve documents
             return self.similarity_search(query, k=adjusted_k)
@@ -267,7 +297,9 @@ class VectorStoreManager:
             chain = relevance_prompt | self.llm
             
             relevant_docs = []
-            for doc in documents:
+            logger.info(f"      🔬 Evaluating {len(documents)} documents for relevance...")
+            
+            for idx, doc in enumerate(documents, 1):
                 try:
                     result = chain.invoke({
                         "question": query, 
@@ -280,10 +312,15 @@ class VectorStoreManager:
                     else:
                         response = str(result).strip().lower()
                     
-                    if 'yes' in response:
+                    is_relevant = 'yes' in response
+                    status = "✓ Relevant" if is_relevant else "✗ Not relevant"
+                    logger.info(f"         Doc {idx}: {status}")
+                    
+                    if is_relevant:
                         relevant_docs.append(doc)
                 except:
                     # If evaluation fails, include the document
+                    logger.info(f"         Doc {idx}: ⚠ Evaluation failed, including by default")
                     relevant_docs.append(doc)
             
             # If we have too few relevant docs, retrieve more
@@ -322,20 +359,34 @@ class VectorStoreManager:
         Returns:
             Retrieved documents
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        
         try:
             # Step 1: Initial retrieval
             if use_fusion:
+                logger.info(f"\n   🔀 RAG FUSION: Generating multiple query variations...")
                 documents = self.rag_fusion(query, k=k*2)
+                logger.info(f"   ✅ Retrieved {len(documents)} docs using fusion")
             elif use_adaptive:
+                logger.info(f"\n   🎯 ADAPTIVE RETRIEVAL: Analyzing query complexity...")
                 documents = self.adaptive_retrieval(query, k=k*2)
+                logger.info(f"   ✅ Retrieved {len(documents)} docs adaptively")
             else:
+                logger.info(f"\n   🔍 STANDARD SEARCH: Basic similarity search...")
                 documents = self.similarity_search(query, k=k*2)
+                logger.info(f"   ✅ Retrieved {len(documents)} docs")
             
             # Step 2: Corrective refinement
             if use_corrective and documents:
+                logger.info(f"\n   🔬 CORRECTIVE RAG: Evaluating relevance...")
+                original_count = len(documents)
                 documents = self.corrective_rag(query, documents, k=k)
+                logger.info(f"   ✅ Refined from {original_count} to {len(documents)} relevant docs")
             
+            logger.info(f"\n   📊 VECTOR SEARCH COMPLETE: {len(documents[:k])} final documents")
             return documents[:k]
             
         except Exception as e:
+            logger.error(f"   ❌ Error in retrieval: {str(e)}")
             raise Exception(f"Error in retrieval: {str(e)}")

@@ -41,7 +41,8 @@ class HybridRAGEngine:
         
         self.llm = ChatOpenAI(
             model=config.llm_model,
-            temperature=config.llm_temperature
+            temperature=config.llm_temperature,
+            max_tokens=1000  # Limit answer to max 1000 tokens
         )
     
     def index_documents(self, documents: List[Document]) -> None:
@@ -153,30 +154,55 @@ class HybridRAGEngine:
         Returns:
             Tuple of (vector_docs, graph_data, query_type)
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        
         try:
             # Force hybrid mode if configured
             if self.config.use_hybrid_by_default and not force_type:
                 query_type = 'hybrid'
+                logger.info("🔀 Hybrid mode enabled by default")
             elif force_type:
                 query_type = force_type
+                logger.info(f"🎯 Forced query type: {query_type}")
             else:
+                logger.info("🤔 Analyzing query type...")
                 query_type = self._determine_query_type(query)
+                logger.info(f"✅ Determined type: {query_type}")
             
             vector_docs = []
             graph_data = {"entities": [], "relationships": [], "context": ""}
             
             # Retrieve based on query type
             if query_type in ['vector', 'hybrid']:
-                print(f"Retrieving from vector store...")
+                logger.info(f"\n{'─' * 80}")
+                logger.info("STEP 2: VECTOR SEARCH PIPELINE")
+                logger.info(f"{'─' * 80}")
+                logger.info("🔍 Retrieving from vector store...")
                 vector_docs = self._retrieve_from_vector(query)
+                logger.info(f"✅ Retrieved {len(vector_docs)} documents from vector store")
             
             if query_type in ['graph', 'hybrid'] and self.config.use_knowledge_graph:
-                print(f"Retrieving from knowledge graph...")
+                logger.info(f"\n{'─' * 80}")
+                logger.info("STEP 3: GRAPH SEARCH PIPELINE")
+                logger.info(f"{'─' * 80}")
+                logger.info("🕸️  Retrieving from knowledge graph...")
                 graph_data = self._retrieve_from_graph(query)
+                logger.info(f"✅ Retrieved {len(graph_data.get('entities', []))} entities, "
+                          f"{len(graph_data.get('relationships', []))} relationships")
+            
+            logger.info(f"\n{'─' * 80}")
+            logger.info("STEP 4: CONTEXT COMBINATION")
+            logger.info(f"{'─' * 80}")
+            logger.info("🔗 Combining vector and graph contexts...")
+            logger.info(f"   ├─ Vector chunks: {len(vector_docs)}")
+            logger.info(f"   ├─ Graph entities: {len(graph_data.get('entities', []))}")
+            logger.info(f"   └─ Graph relations: {len(graph_data.get('relationships', []))}")
             
             return vector_docs, graph_data, query_type
             
         except Exception as e:
+            logger.error(f"❌ Error in retrieval: {str(e)}", exc_info=True)
             raise Exception(f"Error in retrieval: {str(e)}")
     
     def _build_context(
@@ -308,12 +334,31 @@ Answer (provide a natural, comprehensive response based ONLY on the context abov
         Returns:
             Dictionary containing answer and metadata
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        
         try:
+            logger.info(f"\n{'─' * 80}")
+            logger.info("STEP 1: QUERY ANALYSIS")
+            logger.info(f"{'─' * 80}")
+            logger.info(f"🎯 Analyzing query type...")
+            
             # Retrieve information
             vector_docs, graph_data, query_type = self.retrieve(query)
             
+            logger.info(f"🎯 Query Type Determined: {query_type.upper()}")
+            logger.info(f"   → Will use: {'Vector + Graph' if query_type == 'hybrid' else query_type.title()}")
+            
             # Generate answer
+            logger.info(f"\n{'─' * 80}")
+            logger.info("STEP 5: ANSWER GENERATION")
+            logger.info(f"{'─' * 80}")
+            
+            # Limit context to avoid token overflow
+            logger.info("📏 Limiting final context to max 1000 tokens...")
             answer = self.generate_answer(query, vector_docs, graph_data, query_type)
+            
+            logger.info(f"✅ Generated answer ({len(answer.split())} words)")
             
             # Prepare response
             response = {
@@ -322,7 +367,7 @@ Answer (provide a natural, comprehensive response based ONLY on the context abov
                 "num_vector_docs": len(vector_docs),
                 "num_graph_entities": len(graph_data.get('entities', [])),
                 "num_graph_relationships": len(graph_data.get('relationships', [])),
-                "graph_data": graph_data,  # Include full graph data
+                "graph_data": graph_data,
                 "sources": [
                     {
                         "file_name": doc.metadata.get('file_name', 'Unknown'),
@@ -333,9 +378,16 @@ Answer (provide a natural, comprehensive response based ONLY on the context abov
                 ]
             }
             
+            logger.info(f"\n📊 FINAL STATISTICS:")
+            logger.info(f"   ├─ Query Type: {query_type.upper()}")
+            logger.info(f"   ├─ Vector Documents Used: {len(vector_docs)}")
+            logger.info(f"   ├─ Graph Entities Found: {len(graph_data.get('entities', []))}")
+            logger.info(f"   └─ Graph Relationships: {len(graph_data.get('relationships', []))}")
+            
             return response
             
         except Exception as e:
+            logger.error(f"❌ Error processing query: {str(e)}", exc_info=True)
             raise Exception(f"Error processing query: {str(e)}")
     
     def get_statistics(self) -> Dict[str, Any]:

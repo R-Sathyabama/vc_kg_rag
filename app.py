@@ -1,5 +1,5 @@
 """
-Hybrid RAG Application - Main Streamlit App
+Hybrid RAG Application - Clean UI with Verbose Terminal Logging
 Production-ready interface for document Q&A
 """
 import streamlit as st
@@ -7,10 +7,20 @@ import os
 import tempfile
 from pathlib import Path
 from typing import Optional
+from datetime import datetime
 
 from document_processor import DocumentProcessor
 from hybrid_rag import HybridRAGEngine
 from config import RAGConfig
+
+# Configure logging for verbose terminal output
+import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 # Page configuration
 st.set_page_config(
@@ -20,7 +30,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS
+# Custom CSS - Clean and minimal
 st.markdown("""
 <style>
     .main-header {
@@ -30,23 +40,18 @@ st.markdown("""
         text-align: center;
         margin-bottom: 1rem;
     }
-    .sub-header {
-        font-size: 1.2rem;
-        color: #666;
-        text-align: center;
-        margin-bottom: 2rem;
-    }
-    .stats-box {
-        background-color: #f0f2f6;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        margin: 0.5rem 0;
-    }
     .answer-box {
         background-color: #e8f4f8;
         padding: 1.5rem;
         border-radius: 0.5rem;
         border-left: 4px solid #1f77b4;
+        margin: 1rem 0;
+    }
+    .kg-box {
+        background-color: #f0f7f0;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        border-left: 4px solid #2e7d32;
         margin: 1rem 0;
     }
     .source-box {
@@ -73,7 +78,7 @@ def initialize_session_state():
 
 
 def sidebar_configuration():
-    """Render sidebar configuration"""
+    """Render minimal sidebar - only API key"""
     with st.sidebar:
         st.header("⚙️ Configuration")
         
@@ -91,121 +96,53 @@ def sidebar_configuration():
         
         st.divider()
         
-        # Model Settings
-        st.subheader("Model Settings")
-        
-        llm_model = st.selectbox(
-            "LLM Model",
-            ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"],
-            index=0,
-            help="Model for answer generation"
-        )
-        st.session_state.config.llm_model = llm_model
-        
-        embedding_model = st.selectbox(
-            "Embedding Model",
-            ["text-embedding-3-small", "text-embedding-3-large", "text-embedding-ada-002"],
-            index=0,
-            help="Model for document embeddings"
-        )
-        st.session_state.config.embedding_model = embedding_model
-        
-        st.divider()
-        
-        # RAG Settings
-        st.subheader("RAG Settings")
-        
-        chunk_size = st.slider(
-            "Chunk Size",
-            min_value=500,
-            max_value=2000,
-            value=st.session_state.config.chunk_size,
-            step=100,
-            help="Size of text chunks for processing"
-        )
-        st.session_state.config.chunk_size = chunk_size
-        
-        top_k = st.slider(
-            "Top K Retrieval",
-            min_value=3,
-            max_value=10,
-            value=st.session_state.config.top_k_retrieval,
-            step=1,
-            help="Number of documents to retrieve"
-        )
-        st.session_state.config.top_k_retrieval = top_k
-        
-        st.divider()
-        
-        # Advanced RAG Techniques
-        st.subheader("Advanced Techniques")
-        
-        st.info("ℹ️ Hybrid Mode (Vector + KG) enabled by default")
-        
-        rag_fusion = st.checkbox(
-            "RAG Fusion",
-            value=st.session_state.config.rag_fusion,
-            help="Generate multiple query variations for better retrieval"
-        )
-        st.session_state.config.rag_fusion = rag_fusion
-        
-        adaptive_retrieval = st.checkbox(
-            "Adaptive Retrieval",
-            value=st.session_state.config.adaptive_retrieval,
-            help="Adjust retrieval based on query complexity"
-        )
-        st.session_state.config.adaptive_retrieval = adaptive_retrieval
-        
-        corrective_rag = st.checkbox(
-            "Corrective RAG",
-            value=st.session_state.config.corrective_rag,
-            help="Evaluate and refine retrieved documents"
-        )
-        st.session_state.config.corrective_rag = corrective_rag
-        
-        use_kg = st.checkbox(
-            "Knowledge Graph",
-            value=st.session_state.config.use_knowledge_graph,
-            help="Enable knowledge graph for entity relationships"
-        )
-        st.session_state.config.use_knowledge_graph = use_kg
-        
-        st.divider()
-        
-        # System Info
-        st.subheader("System Info")
+        # System Status
+        st.subheader("System Status")
         if st.session_state.documents_processed:
-            st.success("✅ Documents Indexed")
+            st.success("✅ Documents Ready")
             if st.session_state.rag_engine:
                 stats = st.session_state.rag_engine.get_statistics()
-                st.markdown(f"**Vector Store:** Initialized")
                 if 'knowledge_graph' in stats:
                     kg_stats = stats['knowledge_graph']
-                    st.markdown(f"**Entities:** {kg_stats.get('num_nodes', 0)}")
-                    st.markdown(f"**Relations:** {kg_stats.get('num_edges', 0)}")
+                    st.metric("Entities", kg_stats.get('num_nodes', 0))
+                    st.metric("Relations", kg_stats.get('num_edges', 0))
         else:
-            st.info("📄 No documents indexed yet")
+            st.info("📄 Upload documents to begin")
+        
+        st.divider()
+        st.caption("💡 View terminal for detailed processing logs")
 
 
 def process_uploaded_files(uploaded_files):
-    """Process uploaded files"""
+    """Process uploaded files with verbose terminal logging"""
     if not st.session_state.config.openai_api_key:
         st.error("⚠️ Please enter your OpenAI API key in the sidebar")
         return
     
     try:
-        with st.spinner("Processing documents... This may take a few minutes."):
+        logger.info("=" * 80)
+        logger.info("DOCUMENT PROCESSING STARTED")
+        logger.info("=" * 80)
+        
+        with st.spinner("Processing documents... Check terminal for details"):
             # Initialize processor
             processor = DocumentProcessor(
                 chunk_size=st.session_state.config.chunk_size,
                 chunk_overlap=st.session_state.config.chunk_overlap
             )
             
+            logger.info(f"📄 Processing {len(uploaded_files)} file(s)")
+            logger.info(f"⚙️  Chunk Size: {st.session_state.config.chunk_size}")
+            logger.info(f"⚙️  Chunk Overlap: {st.session_state.config.chunk_overlap}")
+            
             # Process all files
             all_documents = []
             progress_bar = st.progress(0)
             
             for i, uploaded_file in enumerate(uploaded_files):
+                logger.info(f"\n{'─' * 80}")
+                logger.info(f"📎 File {i+1}/{len(uploaded_files)}: {uploaded_file.name}")
+                
                 st.text(f"Processing: {uploaded_file.name}")
                 
                 # Save to temporary file
@@ -215,66 +152,73 @@ def process_uploaded_files(uploaded_files):
                 
                 # Process document
                 try:
+                    logger.info("🔄 Extracting text...")
                     documents = processor.process_document(file_path=tmp_path)
+                    logger.info(f"✅ Extracted {len(documents)} chunks")
                     all_documents.extend(documents)
                 except Exception as e:
+                    logger.error(f"❌ Error processing {uploaded_file.name}: {str(e)}")
                     st.warning(f"Error processing {uploaded_file.name}: {str(e)}")
                 finally:
-                    # Clean up temp file
                     if os.path.exists(tmp_path):
                         os.remove(tmp_path)
                 
                 progress_bar.progress((i + 1) / len(uploaded_files))
             
             if not all_documents:
+                logger.error("❌ No documents were successfully processed")
                 st.error("No documents were successfully processed")
                 return
             
-            st.text(f"Processed {len(all_documents)} chunks from {len(uploaded_files)} files")
+            logger.info(f"\n{'=' * 80}")
+            logger.info(f"📊 TOTAL: {len(all_documents)} chunks from {len(uploaded_files)} files")
+            logger.info(f"{'=' * 80}\n")
             
             # Initialize RAG engine
-            st.text("Initializing RAG engine...")
+            logger.info("🚀 Initializing Hybrid RAG Engine...")
             rag_engine = HybridRAGEngine(st.session_state.config)
             
             # Index documents
-            st.text("Indexing documents...")
+            logger.info("\n📥 Starting indexing process...")
             rag_engine.index_documents(all_documents)
             
             # Save to session state
             st.session_state.rag_engine = rag_engine
             st.session_state.documents_processed = True
             
+            logger.info(f"\n{'=' * 80}")
+            logger.info("✅ DOCUMENT PROCESSING COMPLETE")
+            logger.info(f"{'=' * 80}\n")
+            
             st.success(f"✅ Successfully processed {len(uploaded_files)} files with {len(all_documents)} chunks!")
             
     except Exception as e:
+        logger.error(f"❌ PROCESSING ERROR: {str(e)}", exc_info=True)
         st.error(f"Error processing files: {str(e)}")
 
 
 def display_answer(response):
-    """Display answer with formatting and KG visualization"""
+    """Display answer with KG visualization"""
+    # Answer
     st.markdown('<div class="answer-box">', unsafe_allow_html=True)
     st.markdown("### 💡 Answer")
     st.write(response['answer'])
     st.markdown('</div>', unsafe_allow_html=True)
     
-    # Display metadata
+    # Metrics
     col1, col2, col3, col4 = st.columns(4)
-    
     with col1:
         st.metric("Query Type", response['query_type'].upper())
-    
     with col2:
         st.metric("Vector Docs", response['num_vector_docs'])
-    
     with col3:
         st.metric("Graph Entities", response['num_graph_entities'])
-    
     with col4:
         st.metric("Graph Relations", response['num_graph_relationships'])
     
-    # Display Knowledge Graph Data (always shown when available)
+    # Knowledge Graph Insights
     if response.get('graph_data') and (response['graph_data'].get('entities') or response['graph_data'].get('relationships')):
-        st.markdown("---")
+        st.markdown('<div class="kg-box">', unsafe_allow_html=True)
         st.markdown("### 🕸️ Knowledge Graph Insights")
         
         graph_col1, graph_col2 = st.columns(2)
@@ -295,8 +239,10 @@ def display_answer(response):
                     target = rel.get('target', '?')
                     relation = rel.get('relation', 'RELATED_TO')
                     st.markdown(f"- {source} **→** `{relation}` **→** {target}")
+        
+        st.markdown('</div>', unsafe_allow_html=True)
     
-    # Display sources
+    # Sources
     if response['sources']:
         with st.expander("📚 Sources", expanded=False):
             for i, source in enumerate(response['sources'], 1):
@@ -317,16 +263,16 @@ def main():
     # Header
     st.markdown('<div class="main-header">🤖 Hybrid RAG Q&A System</div>', unsafe_allow_html=True)
     st.markdown(
-        '<div class="sub-header">Advanced Document Analysis with Vector Search + Knowledge Graph</div>',
+        '<p style="text-align: center; color: #666;">Advanced Document Analysis with Vector Search + Knowledge Graph</p>',
         unsafe_allow_html=True
     )
     
     # Main content
-    tab1, tab2, tab3 = st.tabs(["📤 Upload Documents", "💬 Ask Questions", "📊 System Stats"])
+    tab1, tab2 = st.tabs(["📤 Upload Documents", "💬 Ask Questions"])
     
     with tab1:
         st.header("Upload Documents")
-        st.markdown("Upload PDF files or images (PNG, JPG) to analyze")
+        st.markdown("Upload PDF files or images to analyze")
         
         uploaded_files = st.file_uploader(
             "Choose files",
@@ -366,19 +312,29 @@ def main():
             
             if ask_button and query:
                 try:
-                    with st.spinner("Thinking..."):
+                    logger.info("\n" + "=" * 80)
+                    logger.info(f"USER QUESTION: {query}")
+                    logger.info("=" * 80)
+                    
+                    with st.spinner("Processing query... Check terminal for detailed flow"):
                         response = st.session_state.rag_engine.query(query)
                         
                         # Add to chat history
                         st.session_state.chat_history.append({
                             "query": query,
-                            "response": response
+                            "response": response,
+                            "timestamp": datetime.now().strftime("%H:%M:%S")
                         })
                         
                         # Display answer
                         display_answer(response)
+                    
+                    logger.info(f"\n{'=' * 80}")
+                    logger.info("✅ QUERY PROCESSING COMPLETE")
+                    logger.info(f"{'=' * 80}\n")
                         
                 except Exception as e:
+                    logger.error(f"❌ QUERY ERROR: {str(e)}", exc_info=True)
                     st.error(f"Error: {str(e)}")
             
             # Display chat history
@@ -387,46 +343,15 @@ def main():
                 st.subheader("Chat History")
                 
                 for i, chat in enumerate(reversed(st.session_state.chat_history[:-1]), 1):
-                    with st.expander(f"Q{len(st.session_state.chat_history) - i}: {chat['query'][:50]}..."):
+                    with st.expander(f"[{chat['timestamp']}] {chat['query'][:50]}..."):
                         st.markdown(f"**Question:** {chat['query']}")
                         st.markdown(f"**Answer:** {chat['response']['answer']}")
-    
-    with tab3:
-        st.header("System Statistics")
-        
-        if st.session_state.documents_processed and st.session_state.rag_engine:
-            stats = st.session_state.rag_engine.get_statistics()
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.subheader("Vector Store")
-                st.markdown(f"**Status:** {'✅ Initialized' if stats['vector_store']['initialized'] else '❌ Not Initialized'}")
-            
-            with col2:
-                if 'knowledge_graph' in stats:
-                    st.subheader("Knowledge Graph")
-                    kg_stats = stats['knowledge_graph']
-                    st.metric("Entities", kg_stats.get('num_nodes', 0))
-                    st.metric("Relationships", kg_stats.get('num_edges', 0))
-                    
-                    if kg_stats.get('entity_types'):
-                        st.markdown("**Entity Types:**")
-                        for entity_type, count in kg_stats['entity_types'].items():
-                            st.write(f"- {entity_type}: {count}")
-                    
-                    if kg_stats.get('relation_types'):
-                        st.markdown("**Relation Types:**")
-                        for relation_type, count in kg_stats['relation_types'].items():
-                            st.write(f"- {relation_type}: {count}")
-        else:
-            st.info("Process documents to see statistics")
     
     # Footer
     st.divider()
     st.markdown(
         '<div style="text-align: center; color: #666; font-size: 0.9rem;">'
-        'Powered by LangChain, OpenAI, and NetworkX | Hybrid RAG System v1.0'
+        'Powered by LangChain, OpenAI, and NetworkX | Hybrid RAG System v1.1'
         '</div>',
         unsafe_allow_html=True
     )
